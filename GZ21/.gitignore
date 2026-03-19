@@ -1,3 +1,5 @@
 mlruns/*
 __pycache__/*
 *.pyc
+*.log
+*.nc
