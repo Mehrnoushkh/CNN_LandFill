@@ -1,0 +1,55 @@
+============================================================
+MULTI-SEED COMPARISON
+============================================================
+Device: cpu
+
+Loading data...
+Creating filled versions...
+Coarsening...
+
+============================================================
+SEED = 25
+============================================================
+  All seeds set to 25
+
+  Training zero_fill...
+    R² = 0.1983
+
+  Training replicate_fill...
+    R² = 0.3676
+
+  Training laplace_fill...
+    R² = 0.3793
+
+============================================================
+SEED = 9
+============================================================
+  All seeds set to 9
+
+  Training zero_fill...
+    R² = 0.2491
+
+  Training replicate_fill...
+    R² = 0.3786
+
+  Training laplace_fill...
+    R² = 0.4663
+
+============================================================
+FINAL RESULTS (mean ± std over 5 seeds)
+============================================================
+
+Method                     Overall R²         Coastal R²      Open Ocean R²
+----------------------------------------------------------------------------
+zero_fill          0.224 ± 0.025      0.165 ± 0.017      0.291 ± 0.029
+replicate_fill     0.373 ± 0.006      0.334 ± 0.001      0.417 ± 0.006
+laplace_fill       0.423 ± 0.043      0.395 ± 0.044      0.453 ± 0.040
+
+✓ Results saved to ./output_three_methods_multiseed_v04/results_multiseed.json
+✓ Plot saved
+
+Done!
+✓ Plot with error bars saved
+✓ Plot without error bars saved
+
+Done!

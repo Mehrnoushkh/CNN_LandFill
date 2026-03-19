@@ -1,0 +1,4 @@
+threemethods_modelv02.py:142: RuntimeWarning: Mean of empty slice
+  T_coarse[t_start:t_end] = np.nanmean(T_reshaped, axis=(2, 4))
+threemethods_modelv02.py:143: RuntimeWarning: Mean of empty slice
+  T_sq_coarse = np.nanmean(T_reshaped ** 2, axis=(2, 4))

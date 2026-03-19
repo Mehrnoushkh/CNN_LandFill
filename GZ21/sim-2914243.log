@@ -1,0 +1,172 @@
+✓ Imported GZ21 FullyCNN
+============================================================
+THREE-WAY COMPARISON (Memory Efficient)
+Zero-fill vs Replicate-fill vs Laplace-fill
+All predict the SAME ocean-only S_T target
+============================================================
+
+Device: cpu
+
+============================================================
+LOADING ORIGINAL DATA
+============================================================
+Shape: (364, 1800, 3600)
+Memory: 9.43 GB
+Land fraction: 33.3%
+
+============================================================
+CREATING THREE FILLED VERSIONS
+============================================================
+
+1. Zero-fill (land = 0)...
+   Range: [0.0, 312.4] K
+
+2. Replicate-fill (land = nearest ocean)...
+  Creating replicate-fill...
+    Computing nearest ocean indices...
+    Filling 364 time steps...
+      Time step 0/364
+      Time step 100/364
+      Time step 200/364
+      Time step 300/364
+    Done. Range: [270.0, 312.4] K
+
+3. Laplace-fill (from file)...
+   Range: [270.0, 312.4] K
+
+============================================================
+COMPUTING COARSE DATA AND TARGET
+============================================================
+
+Computing TRUE target (from original with NaN)...
+    Coarsening 364 time steps in chunks of 50...
+      Processed 0/364 time steps
+      Processed 100/364 time steps
+      Processed 200/364 time steps
+      Processed 300/364 time steps
+    Done. Output shape: (364, 450, 900)
+Ocean points: 276445
+Coastal points: 66059
+Open ocean points: 210386
+
+Computing coarse zero-fill...
+    Coarsening 364 time steps in chunks of 50...
+      Processed 0/364 time steps
+      Processed 100/364 time steps
+      Processed 200/364 time steps
+      Processed 300/364 time steps
+    Done. Output shape: (364, 450, 900)
+
+Computing coarse replicate-fill...
+    Coarsening 364 time steps in chunks of 50...
+      Processed 0/364 time steps
+      Processed 100/364 time steps
+      Processed 200/364 time steps
+      Processed 300/364 time steps
+    Done. Output shape: (364, 450, 900)
+
+Computing coarse Laplace-fill...
+    Coarsening 364 time steps in chunks of 50...
+      Processed 0/364 time steps
+      Processed 100/364 time steps
+      Processed 200/364 time steps
+      Processed 300/364 time steps
+    Done. Output shape: (364, 450, 900)
+
+Coarse shape: (364, 450, 900)
+
+============================================================
+CREATING DATASETS
+============================================================
+Train: 291, Val: 73
+
+============================================================
+TRAINING: ZERO-FILL
+============================================================
+  Epoch   0: train=15.5490, val=13.1655
+  Epoch  10: train=-0.1152, val=0.4435
+  Epoch  20: train=-0.7642, val=1.0021
+  Epoch  30: train=-3.6884, val=-3.4716
+  Epoch  40: train=-4.5370, val=-4.1024
+  Epoch  50: train=-4.8731, val=-4.5601
+  Epoch  60: train=-5.3533, val=-4.6639
+  Epoch  70: train=-5.6887, val=-5.0801
+  Epoch  80: train=-5.9767, val=-5.5455
+  Epoch  90: train=-6.2090, val=-5.3233
+
+============================================================
+TRAINING: REPLICATE-FILL
+============================================================
+  Epoch   0: train=15.6255, val=12.8114
+  Epoch  10: train=-2.6854, val=-3.0694
+  Epoch  20: train=-6.3516, val=-5.5825
+  Epoch  30: train=-6.8355, val=-6.0184
+  Epoch  40: train=-7.3491, val=-6.7025
+  Epoch  50: train=-7.5031, val=-6.8906
+  Epoch  60: train=-7.6242, val=-6.9807
+  Epoch  70: train=-7.8406, val=-7.2265
+  Epoch  80: train=-8.0006, val=-7.3749
+  Epoch  90: train=-7.8220, val=-7.0705
+
+============================================================
+TRAINING: LAPLACE-FILL
+============================================================
+  Epoch   0: train=15.8442, val=13.6231
+  Epoch  10: train=-2.1499, val=-2.7467
+  Epoch  20: train=-2.0947, val=0.2991
+  Epoch  30: train=-6.8999, val=-6.2776
+  Epoch  40: train=-7.3930, val=-6.7934
+  Epoch  50: train=-7.6226, val=-6.9562
+  Epoch  60: train=-7.8587, val=-7.1570
+  Epoch  70: train=-7.9890, val=-7.1021
+  Epoch  80: train=-8.0622, val=-7.4923
+  Epoch  90: train=-8.3101, val=-7.6170
+
+============================================================
+EVALUATING MODELS
+============================================================
+
+============================================================
+RESULTS COMPARISON
+============================================================
+
+Method                 Overall R²   Coastal R²  Open Ocean R²
+--------------------------------------------------------------
+Zero-fill                  0.2095       0.1455         0.2951
+Replicate-fill             0.3309       0.2949         0.3754
+Laplace-fill               0.4130       0.3809         0.4528
+
+============================================================
+SAVING MODELS
+============================================================
+  ✓ Saved model_zero_fill.pth
+  ✓ Saved model_replicate_fill.pth
+  ✓ Saved model_laplace_fill.pth
+
+============================================================
+GENERATING PLOTS
+============================================================
+  ✓ Saved r2_three_methods.png
+  ✓ Saved training_three_methods.png
+  ✓ Saved region_map.png
+  ✓ Saved results.json
+
+============================================================
+SUMMARY
+============================================================
+
+Overall R²:
+  Zero-fill:      0.2095
+  Replicate-fill: 0.3309
+  Laplace-fill:   0.4130
+
+Improvement over Zero-fill:
+  Replicate: +58.0% overall, +102.6% coastal
+  Laplace:   +97.2% overall, +161.7% coastal
+
+Improvement of Laplace over Replicate:
+  Overall: +24.8%
+  Coastal: +29.2%
+  Open Ocean: +20.6%
+
+Done!

@@ -1,5 +1,5 @@
 """
-Reproducible 3-method comparison with multiple seeds.
+Complete 3-method comparison with multiple seeds AND spatial map generation.
 """
 
 import sys
@@ -31,17 +31,17 @@ ORIGINAL_VAR_NAME = 'analysed_sst'
 FILLED_VAR_NAME = 'sst_neumann'
 FILL_VALUE = -999.0
 
-COARSEN_FACTOR = 10 #4
+COARSEN_FACTOR = 10
 EPOCHS = 100
-BATCH_SIZE = 50
+BATCH_SIZE = 32
 LEARNING_RATE = 5e-4
 TRAIN_FRACTION = 0.8
 MAX_TIME_STEPS = 364
 
-OUTPUT_DIR = './output_three_methods_multiseed_factor10'
+OUTPUT_DIR = './output_three_methods_complete_1deg'
 
 # Multiple seeds for statistical robustness
-SEEDS = [12,124,458,789,1120] #[42, 123, 456, 789, 1011]
+SEEDS = [42]#, 123, 456, 789, 1011]
 
 # =============================================================================
 # Seed function
@@ -66,7 +66,7 @@ sys.path.insert(0, GZ21_PATH)
 from models.models1 import FullyCNN
 
 # =============================================================================
-# Helper classes (same as before)
+# Helper classes
 # =============================================================================
 
 class SoftPlusTransform(nn.Module):
@@ -247,9 +247,56 @@ def evaluate_model(model, data_loader, ocean_mask, coastal_mask, S_mean, S_std, 
     }
 
 
+def get_spatial_predictions(model, dataset, ocean_mask, device):
+    """Get spatial map of predictions averaged over all time steps."""
+    model.eval()
+    
+    S_mean = dataset.S_mean
+    S_std = dataset.S_std
+    
+    all_preds = []
+    all_targets = []
+    
+    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
+    
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            out = model(x)
+            
+            # Denormalize
+            pred = out[:, 0:1, :, :].cpu().numpy() * S_std + S_mean
+            target = y.cpu().numpy() * S_std + S_mean
+            
+            all_preds.append(pred)
+            all_targets.append(target)
+    
+    preds = np.concatenate(all_preds, axis=0)[:, 0, :, :]
+    targets = np.concatenate(all_targets, axis=0)[:, 0, :, :]
+    
+    # Time-averaged spatial maps
+    pred_mean = np.mean(preds, axis=0)
+    target_mean = np.mean(targets, axis=0)
+    error_mean = pred_mean - target_mean
+    
+    # Mask land
+    pred_mean_masked = pred_mean.copy()
+    target_mean_masked = target_mean.copy()
+    error_mean_masked = error_mean.copy()
+    pred_mean_masked[~ocean_mask] = np.nan
+    target_mean_masked[~ocean_mask] = np.nan
+    error_mean_masked[~ocean_mask] = np.nan
+    
+    return {
+        'pred': pred_mean_masked,
+        'target': target_mean_masked,
+        'error': error_mean_masked,
+    }
+
+
 def main():
     print("=" * 60)
-    print("MULTI-SEED COMPARISON")
+    print("MULTI-SEED COMPARISON WITH SPATIAL MAPS")
     print("=" * 60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -257,7 +304,7 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # =========================================================================
-    # Load and prepare data (ONCE, outside seed loop)
+    # Load and prepare data
     # =========================================================================
     print("\nLoading data...")
     ds_orig = xr.open_dataset(ORIGINAL_DATA_FILE, decode_times=False)
@@ -291,7 +338,7 @@ def main():
     T_coarse_replicate, _ = compute_subgrid_forcing(T_replicate, COARSEN_FACTOR)
     T_coarse_laplace, _ = compute_subgrid_forcing(T_laplace, COARSEN_FACTOR)
 
-    # Free memory
+    # Free memory (keep T_coarse arrays for potential plotting)
     del T_orig, T_orig_with_nan, T_zero, T_replicate, T_laplace
 
     # Mask tensor
@@ -306,12 +353,14 @@ def main():
         'laplace_fill': {'overall': [], 'coastal': [], 'open_ocean': []},
     }
 
+    # Store models from last seed for spatial maps
+    models = {}
+
     for seed in SEEDS:
         print(f"\n{'='*60}")
         print(f"SEED = {seed}")
         print(f"{'='*60}")
 
-        # Set all seeds
         set_all_seeds(seed)
 
         # Create datasets
@@ -354,13 +403,17 @@ def main():
             all_results[name]['coastal'].append(results['r2_coastal'])
             all_results[name]['open_ocean'].append(results['r2_open_ocean'])
 
-            print(f"    R² = {results['r2_overall']:.4f}")
+            print(f"    R² = {results['r2_overall']:.4f}, coastal={results['r2_coastal']:.4f}, open={results['r2_open_ocean']:.4f}")
+
+            # Store model and dataset from last seed for spatial maps
+            if seed == SEEDS[-1]:
+                models[name] = {'model': model, 'dataset': dataset}
 
     # =========================================================================
     # Compute statistics
     # =========================================================================
     print(f"\n{'='*60}")
-    print("FINAL RESULTS (mean ± std over 5 seeds)")
+    print(f"FINAL RESULTS (mean ± std over {len(SEEDS)} seeds)")
     print(f"{'='*60}")
 
     final_results = {}
@@ -370,7 +423,11 @@ def main():
             values = all_results[method][region]
             mean = np.mean(values)
             std = np.std(values)
-            final_results[method][region] = {'mean': mean, 'std': std, 'values': values}
+            p25 = np.percentile(values, 25)
+            p75 = np.percentile(values, 75)
+            final_results[method][region] = {
+                'mean': mean, 'std': std, 'p25': p25, 'p75': p75, 'values': values
+            }
 
     # Print table
     print(f"\n{'Method':<18} {'Overall R²':>18} {'Coastal R²':>18} {'Open Ocean R²':>18}")
@@ -385,141 +442,258 @@ def main():
 
     # Save results
     with open(os.path.join(OUTPUT_DIR, 'results_multiseed.json'), 'w') as f:
-        json.dump(final_results, f, indent=2, default=lambda x: float(x) if isinstance(x, np.floating) else x)
+        json.dump(final_results, f, indent=2, default=lambda x: float(x) if isinstance(x, np.floating) else list(x) if isinstance(x, np.ndarray) else x)
 
     print(f"\n✓ Results saved to {OUTPUT_DIR}/results_multiseed.json")
 
     # =========================================================================
-    # Plot with error bars
+    # Plot R² with error bars (25th-75th percentile)
     # =========================================================================
-    fig, ax = plt.subplots(figsize=(10, 6))
+    print("\nPlotting R² comparison...")
+    
+    COLORS = {
+        'overall': '#0072B2',
+        'coastal': '#D55E00',
+        'open_ocean': '#009E73',
+    }
 
     methods = ['Zero-fill', 'Replicate-fill', 'Laplace-fill']
-    x = np.arange(len(methods))
-    width = 0.25
-
-    for i, (region, color) in enumerate([('overall', 'steelblue'), 
-                                          ('coastal', 'coral'), 
-                                          ('open_ocean', 'seagreen')]):
-        means = [final_results[m.lower().replace('-', '_')][region]['mean'] for m in methods]
-        stds = [final_results[m.lower().replace('-', '_')][region]['std'] for m in methods]
-        
-        bars = ax.bar(x + (i - 1) * width, means, width, 
-                      yerr=stds, capsize=5,
-                      label=region.replace('_', ' ').title(), 
-                      color=color, alpha=0.8)
-
-    ax.set_ylabel('R² Score')
-    ax.set_title('CNN Performance: Three Land Fill Methods\n(Mean ± Std over 5 seeds)')
-    ax.set_xticks(x)
-    ax.set_xticklabels(methods)
-    ax.legend()
-    ax.grid(True, alpha=0.3, axis='y')
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_three_methods_errorbars.png'), dpi=150)
-    plt.close()
-
-    print("✓ Plot saved")
-    print("\nDone!")
-
-    # =========================================================================
-    # Professional Color Palette
-    # =========================================================================
-    COLORS = ['#3498DB', '#E67E22', '#2ECC71']  # Sky Blue, Carrot, Emerald
-    
-    # =========================================================================
-    # Plot 1: With Error Bars (Multi-seed)
-    # =========================================================================
-    fig, ax = plt.subplots(figsize=(6, 4))
-    
-    methods = ['Zero-fill', 'Replicate-fill', 'Laplace-fill']
+    method_keys = ['zero_fill', 'replicate_fill', 'laplace_fill']
     regions = ['overall', 'coastal', 'open_ocean']
     region_labels = ['Overall', 'Coastal', 'Open Ocean']
+
     x = np.arange(len(methods))
-    width = 0.25
-    
-    for i, (region, label, color) in enumerate(zip(regions, region_labels, COLORS)):
-        means = [final_results[m.lower().replace('-', '_')][region]['mean'] for m in methods]
-        stds = [final_results[m.lower().replace('-', '_')][region]['std'] for m in methods]
-        
-        bars = ax.bar(x + (i - 1) * width, means, width,
-                      yerr=stds, capsize=4,
-                      label=label,
-                      color=color, 
-                      edgecolor='white', 
-                      linewidth=0.7,
-                      error_kw={'linewidth': 1.2, 'capthick': 1.2})
-        
-        # Add mean values on bars
-        for bar, mean in zip(bars, means):
-            height = bar.get_height()
-            ax.annotate(f'{mean:.3f}',
-                       xy=(bar.get_x() + bar.get_width()/2, height + stds[bars.index(bar)] + 0.01),
-                       ha='center', va='bottom', fontsize=8, fontweight='medium')
-    
-    ax.set_ylabel('$R^2$ Score', fontsize=12)
-    ax.set_xlabel('')
-    ax.set_xticks(x)
-    ax.set_xticklabels(methods, fontsize=11)
-    ax.set_ylim(0, max([final_results[m.lower().replace('-', '_')]['open_ocean']['mean'] for m in methods]) * 1.25)
-    
-    # Clean style
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.legend(frameon=False, fontsize=10, loc='upper left')
-    ax.grid(True, alpha=0.3, axis='y', linestyle='--', linewidth=0.5)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_three_methods_errorbars.png'), dpi=300, bbox_inches='tight')
-    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_three_methods_errorbars.pdf'), bbox_inches='tight')
-    plt.close()
-    print("✓ Plot with error bars saved")
-    
-    # =========================================================================
-    # Plot 2: Without Error Bars (Single Values)
-    # =========================================================================
+    width = 0.24
+    offsets = [-width, 0, width]
+
     fig, ax = plt.subplots(figsize=(8, 5))
-    
-    for i, (region, label, color) in enumerate(zip(regions, region_labels, COLORS)):
-        # Use mean values as single values
-        values = [final_results[m.lower().replace('-', '_')][region]['mean'] for m in methods]
+
+    for i, (region, label) in enumerate(zip(regions, region_labels)):
+        means = [final_results[m][region]['mean'] for m in method_keys]
+        p25 = [final_results[m][region]['p25'] for m in method_keys]
+        p75 = [final_results[m][region]['p75'] for m in method_keys]
         
-        bars = ax.bar(x + (i - 1) * width, values, width,
+        yerr_lower = [means[j] - p25[j] for j in range(3)]
+        yerr_upper = [p75[j] - means[j] for j in range(3)]
+        
+        bars = ax.bar(x + offsets[i], means, width,
+                      yerr=[yerr_lower, yerr_upper],
+                      capsize=4,
                       label=label,
-                      color=color, 
-                      edgecolor='white', 
-                      linewidth=0.7)
-        
-        # Add values on bars
-        for bar, val in zip(bars, values):
-            height = bar.get_height()
-            ax.annotate(f'{val:.3f}',
-                       xy=(bar.get_x() + bar.get_width()/2, height),
-                       xytext=(0, 3), textcoords="offset points",
-                       ha='center', va='bottom', fontsize=8, fontweight='medium')
-    
-    ax.set_ylabel('$R^2$ Score', fontsize=12)
-    ax.set_xlabel('')
+                      color=COLORS[region],
+                      edgecolor='white',
+                      linewidth=1,
+                      error_kw={'linewidth': 1.8, 'capthick': 1.8, 'ecolor': '#333333'})
+
+    ax.set_ylabel('$R^2$', fontsize=13, fontweight='medium')
     ax.set_xticks(x)
-    ax.set_xticklabels(methods, fontsize=11)
-    ax.set_ylim(0, max([final_results[m.lower().replace('-', '_')]['open_ocean']['mean'] for m in methods]) * 1.2)
-    
-    # Clean style
+    ax.set_xticklabels(methods, fontsize=12, fontweight='medium')
+    ax.set_ylim(0, 0.55)
+
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.legend(frameon=False, fontsize=10, loc='upper left')
-    ax.grid(True, alpha=0.3, axis='y', linestyle='--', linewidth=0.5)
-    
+    ax.yaxis.grid(True, alpha=0.3, linestyle='--', linewidth=0.6)
+    ax.set_axisbelow(True)
+
+    ax.legend(frameon=False, fontsize=11, loc='upper left')
+
+    ax.text(0.98, 0.02, f'n = {len(SEEDS)} seeds, error bars = IQR', 
+            transform=ax.transAxes, fontsize=9, ha='right', va='bottom',
+            color='#666666')
+
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_three_methods.png'), dpi=300, bbox_inches='tight')
-    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_three_methods.pdf'), bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_comparison.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'r2_comparison.pdf'), bbox_inches='tight')
     plt.close()
-    print("✓ Plot without error bars saved")
+    print("✓ Saved: r2_comparison.png")
+
+    # =========================================================================
+    # SPATIAL MAPS
+    # =========================================================================
+    print("\nGenerating spatial maps...")
     
-    print("\nDone!")
+    # Get spatial predictions using models from last seed
+    maps_zero = get_spatial_predictions(
+        models['zero_fill']['model'], 
+        models['zero_fill']['dataset'], 
+        ocean_mask, device
+    )
+    maps_replicate = get_spatial_predictions(
+        models['replicate_fill']['model'], 
+        models['replicate_fill']['dataset'], 
+        ocean_mask, device
+    )
+    maps_laplace = get_spatial_predictions(
+        models['laplace_fill']['model'], 
+        models['laplace_fill']['dataset'], 
+        ocean_mask, device
+    )
     
+    # Save spatial maps
+    np.savez(os.path.join(OUTPUT_DIR, 'spatial_maps.npz'),
+             target=maps_zero['target'],
+             pred_zero=maps_zero['pred'],
+             pred_replicate=maps_replicate['pred'],
+             pred_laplace=maps_laplace['pred'],
+             error_zero=maps_zero['error'],
+             error_replicate=maps_replicate['error'],
+             error_laplace=maps_laplace['error'],
+             ocean_mask=ocean_mask,
+             coastal_mask=coastal_mask)
+    print("✓ Saved: spatial_maps.npz")
     
+    # --- Plot 1: Target and Predictions (2x2) ---
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    
+    vmin, vmax = 0, np.nanpercentile(maps_zero['target'], 95)
+    cmap = 'viridis'
+    
+    data_list = [
+        (maps_zero['target'], 'True $S_T$ (Target)'),
+        (maps_zero['pred'], 'Predicted $S_T$ (Zero-fill)'),
+        (maps_replicate['pred'], 'Predicted $S_T$ (Replicate-fill)'),
+        (maps_laplace['pred'], 'Predicted $S_T$ (Laplace-fill)'),
+    ]
+    
+    for ax, (data, title) in zip(axes.flat, data_list):
+        im = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto')
+        ax.set_title(title, fontsize=12, fontweight='medium')
+        ax.set_xlabel('Longitude Index')
+        ax.set_ylabel('Latitude Index')
+    
+    cbar = fig.colorbar(im, ax=axes, orientation='vertical', fraction=0.02, pad=0.02)
+    cbar.set_label('Subgrid Variance $S_T$ (K²)', fontsize=11)
+    
+    plt.suptitle('Subgrid Temperature Variance: Target vs Predictions', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'ST_predictions.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved: ST_predictions.png")
+    
+    # --- Plot 2: Error Maps (1x3) ---
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    err_max = np.nanpercentile(np.abs(maps_zero['error']), 95)
+    
+    error_list = [
+        (maps_zero['error'], 'Error: Zero-fill'),
+        (maps_replicate['error'], 'Error: Replicate-fill'),
+        (maps_laplace['error'], 'Error: Laplace-fill'),
+    ]
+    
+    for ax, (data, title) in zip(axes, error_list):
+        im = ax.imshow(data, cmap='bwr', vmin=-err_max, vmax=err_max, aspect='auto')
+        ax.set_title(title, fontsize=12, fontweight='medium')
+        ax.set_xlabel('Longitude Index')
+        ax.set_ylabel('Latitude Index')
+    
+    cbar = fig.colorbar(im, ax=axes, orientation='vertical', fraction=0.015, pad=0.02)
+    cbar.set_label('Error (Predicted − True) (K²)', fontsize=11)
+    
+    plt.suptitle('Prediction Errors: $S_T^{pred} - S_T^{true}$', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'ST_errors.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved: ST_errors.png")
+    
+    # --- Plot 3: Zoomed Coastal Region ---
+    y1, y2 = 200, 350
+    x1, x2 = 300, 500
+    
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    
+    pred_list = [
+        (maps_zero['pred'][y1:y2, x1:x2], 'Zero-fill'),
+        (maps_replicate['pred'][y1:y2, x1:x2], 'Replicate-fill'),
+        (maps_laplace['pred'][y1:y2, x1:x2], 'Laplace-fill'),
+    ]
+    
+    for ax, (data, title) in zip(axes[0], pred_list):
+        im = ax.imshow(data, cmap='viridis', vmin=vmin, vmax=vmax, aspect='auto')
+        ax.set_title(f'Predicted $S_T$: {title}', fontsize=11)
+    
+    error_list_zoom = [
+        (maps_zero['error'][y1:y2, x1:x2], 'Zero-fill'),
+        (maps_replicate['error'][y1:y2, x1:x2], 'Replicate-fill'),
+        (maps_laplace['error'][y1:y2, x1:x2], 'Laplace-fill'),
+    ]
+    
+    for ax, (data, title) in zip(axes[1], error_list_zoom):
+        im2 = ax.imshow(data, cmap='bwr', vmin=-err_max, vmax=err_max, aspect='auto')
+        ax.set_title(f'Error: {title}', fontsize=11)
+    
+    fig.colorbar(im, ax=axes[0], orientation='vertical', fraction=0.02, pad=0.02, label='$S_T$ (K²)')
+    fig.colorbar(im2, ax=axes[1], orientation='vertical', fraction=0.02, pad=0.02, label='Error (K²)')
+    
+    plt.suptitle('Zoomed Coastal Region', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'ST_coastal_zoom.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved: ST_coastal_zoom.png")
+    
+    # --- Plot 4: Error Metrics Bar Chart ---
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    
+    methods_names = ['Zero-fill', 'Replicate-fill', 'Laplace-fill']
+    errors = [maps_zero['error'], maps_replicate['error'], maps_laplace['error']]
+    
+    open_ocean_mask = ocean_mask & ~coastal_mask
+    
+    rmse_coastal = [np.sqrt(np.nanmean(err[coastal_mask]**2)) for err in errors]
+    rmse_open = [np.sqrt(np.nanmean(err[open_ocean_mask]**2)) for err in errors]
+    
+    x_bar = np.arange(3)
+    width_bar = 0.35
+    
+    axes[0].bar(x_bar - width_bar/2, rmse_coastal, width_bar, label='Coastal', color='#D55E00')
+    axes[0].bar(x_bar + width_bar/2, rmse_open, width_bar, label='Open Ocean', color='#009E73')
+    axes[0].set_xticks(x_bar)
+    axes[0].set_xticklabels(methods_names)
+    axes[0].set_ylabel('RMSE (K²)')
+    axes[0].set_title('RMSE by Region')
+    axes[0].legend()
+    axes[0].spines['top'].set_visible(False)
+    axes[0].spines['right'].set_visible(False)
+    
+    mae_coastal = [np.nanmean(np.abs(err[coastal_mask])) for err in errors]
+    mae_open = [np.nanmean(np.abs(err[open_ocean_mask])) for err in errors]
+    
+    axes[1].bar(x_bar - width_bar/2, mae_coastal, width_bar, label='Coastal', color='#D55E00')
+    axes[1].bar(x_bar + width_bar/2, mae_open, width_bar, label='Open Ocean', color='#009E73')
+    axes[1].set_xticks(x_bar)
+    axes[1].set_xticklabels(methods_names)
+    axes[1].set_ylabel('MAE (K²)')
+    axes[1].set_title('MAE by Region')
+    axes[1].legend()
+    axes[1].spines['top'].set_visible(False)
+    axes[1].spines['right'].set_visible(False)
+    
+    plt.suptitle('Spatial Error Metrics', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'ST_error_metrics.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved: ST_error_metrics.png")
+    
+    # =========================================================================
+    # Print summary for paper
+    # =========================================================================
+    print(f"\n{'='*60}")
+    print("FOR PAPER:")
+    print(f"{'='*60}")
+    print(f"\nResults from {len(SEEDS)} independent training runs:\n")
+    
+    for method, method_label in zip(method_keys, methods):
+        o = final_results[method]['overall']
+        c = final_results[method]['coastal']
+        oo = final_results[method]['open_ocean']
+        print(f"{method_label}:")
+        print(f"  Overall:    R² = {o['mean']:.3f} [{o['p25']:.3f}, {o['p75']:.3f}]")
+        print(f"  Coastal:    R² = {c['mean']:.3f} [{c['p25']:.3f}, {c['p75']:.3f}]")
+        print(f"  Open Ocean: R² = {oo['mean']:.3f} [{oo['p25']:.3f}, {oo['p75']:.3f}]")
+        print()
+    
+    print("\n✓ All done!")
+
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,45 @@
+============================================================
+PACIFIC BOX COMPARISON
+Testing R² far from land
+============================================================
+Device: cpu
+
+Loading models...
+  ✓ Models loaded
+
+Loading data...
+  Original shape: (364, 1800, 3600)
+
+Computing coarse data...
+  Coarse shape: (364, 450, 900)
+  Ocean points: 276445
+
+Creating Pacific box mask...
+  Pacific box: lat[550:600], lon[2300:2350]
+  Pacific ocean points: 0
+  Land points in box: 0
+
+Making predictions...
+  ✓ Predictions done
+
+============================================================
+R² COMPARISON BY REGION
+============================================================
+
+Region                            Zero-fill R² Physics-fill R²   Difference
+---------------------------------------------------------------------------
+Global Ocean                            0.2097          0.3650       0.1553
+Pacific Box (far from land)                nan             nan          nan
+
+Generating plots...
+  ✓ Saved pacific_box_comparison.png
+
+============================================================
+SUMMARY
+============================================================
+
+Global improvement: 0.1553 (74.0%)
+Pacific box improvement: nan (nan%)
+
+→ Pacific box still shows difference
+  This is because models were trained on different data

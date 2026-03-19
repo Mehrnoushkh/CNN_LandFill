@@ -1,0 +1,17 @@
+============================================================
+PACIFIC BOX COMPARISON
+Testing R² far from land
+============================================================
+Device: cpu
+
+Loading models...
+  ✓ Models loaded
+
+Loading data...
+  Original shape: (364, 1800, 3600)
+
+Computing coarse data...
+  Coarse shape: (364, 450, 900)
+  Ocean points: 276445
+
+Creating Pacific box mask...

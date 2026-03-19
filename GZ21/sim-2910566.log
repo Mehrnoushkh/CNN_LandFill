@@ -1,0 +1,40 @@
+✓ Imported GZ21 FullyCNN
+============================================================
+THREE-WAY COMPARISON
+Zero-fill vs Replicate-fill vs Laplace-fill
+All predict the SAME ocean-only S_T target
+============================================================
+
+Device: cpu
+
+============================================================
+LOADING ORIGINAL DATA
+============================================================
+Shape: (364, 1800, 3600)
+Land fraction: 33.3%
+
+============================================================
+CREATING THREE FILLED VERSIONS
+============================================================
+
+1. Zero-fill (land = 0)...
+   Range: [0.0, 312.4] K
+
+2. Replicate-fill (land = nearest ocean)...
+  Creating replicate-fill...
+    Time step 0/364
+    Time step 50/364
+    Time step 100/364
+    Time step 150/364
+    Time step 200/364
+    Time step 250/364
+    Time step 300/364
+    Time step 350/364
+   Range: [270.0, 312.4] K
+
+3. Laplace-fill (from file)...
+   Range: [270.0, 312.4] K
+
+============================================================
+COMPUTING COARSE DATA AND TARGET
+============================================================
