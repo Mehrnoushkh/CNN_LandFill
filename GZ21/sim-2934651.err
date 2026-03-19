@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/scratch/10081/mkharghani/SST/GZ21/threemethods_modelv02.py", line 7, in <module>
-    import numpy as np
-ModuleNotFoundError: No module named 'numpy'
