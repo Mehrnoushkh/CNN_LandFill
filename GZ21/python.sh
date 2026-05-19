@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --output=sim-%j.log
 #SBATCH --error=sim-%j.err
-#SBATCH -p spr          # SKX has more memory than SPR
+#SBATCH -p skx          # SKX has more memory than SPR
 #SBATCH --time=01-20:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=112
-#SBATCH --job-name="CNN_100"
+#SBATCH --cpus-per-task=48   # 112
+#SBATCH --job-name="cnn"
 
 #module load python3              # Load Python module if needed
 #conda activate CDS
@@ -16,7 +16,7 @@
 #python compare_learn.py
 
 
-python threemethods_modelv03.py
+python threemethods_modelv04.py
 #python  threemethods_model.py
 
 #python train_filled.py

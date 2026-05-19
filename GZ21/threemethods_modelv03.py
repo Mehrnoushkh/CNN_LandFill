@@ -41,7 +41,7 @@ MAX_TIME_STEPS = 364
 OUTPUT_DIR = './output_three_methods_complete_1deg'
 
 # Multiple seeds for statistical robustness
-SEEDS = [42]#, 123, 456, 789, 1011]
+SEEDS = [42, 123, 456, 789, 1011]
 
 # =============================================================================
 # Seed function
