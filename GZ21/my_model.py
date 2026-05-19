@@ -1,16 +1,6 @@
 """
 train_single.py
 
-Simple training script for ONE case: land (-999) → zero-filled.
-
-Your data:
-    - File: updated_data/res005/cs3_glo_2023.nc (or similar)
-    - Variable: analysed_sst
-    - Dimensions: time (365), latitude (1800), longitude (3600)
-    - Fill value: -999 (land)
-    - Resolution: 0.1° → coarsen 4x → 0.4°
-
-Usage:
     python train_single.py
 """
 
